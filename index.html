@@ -202,11 +202,41 @@
 
             const thead = document.createElement('thead');
             const trh = document.createElement('tr');
-            columns.forEach(c => {
-                const th = document.createElement('th');
-                th.textContent = c;
-                trh.appendChild(th);
-            });
+            let keyInfo = null;
+
+// nur wenn SELECT * FROM table kommt → dann wissen wir die Tabelle
+if (extraInfoHtml && extraInfoHtml.includes('SELECT * FROM')) {
+  const match = extraInfoHtml.match(/FROM\s+(\w+)/i);
+  if (match) {
+    keyInfo = getKeyInfoForTable(match[1]);
+  }
+}
+
+columns.forEach(c => {
+  const th = document.createElement('th');
+
+  const wrapper = document.createElement('span');
+  wrapper.className = 'th-key';
+  wrapper.textContent = c;
+
+  if (keyInfo) {
+    if (keyInfo.pkCols.has(c)) {
+      const icon = document.createElement('span');
+      icon.className = 'key-pk';
+      icon.textContent = '🔑';
+      wrapper.prepend(icon);
+    } else if (keyInfo.fkCols.has(c)) {
+      const icon = document.createElement('span');
+      icon.className = 'key-fk';
+      icon.textContent = '🔑';
+      wrapper.prepend(icon);
+    }
+  }
+
+  th.appendChild(wrapper);
+  trh.appendChild(th);
+});
+
             thead.appendChild(trh);
             table.appendChild(thead);
 
@@ -522,4 +552,5 @@
 </script>
 </body>
 </html>
+
 
