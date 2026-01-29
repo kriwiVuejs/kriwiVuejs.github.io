@@ -116,6 +116,9 @@
 <script>
     let SQL = null;
     let db = null;
+
+
+    // ✅ Deine Tabellen – so wie du sie willst (einfach, klare Spaltennamen)
     const schemaSql = `
         CREATE TABLE pokemon (
                                  id INTEGER PRIMARY KEY,
@@ -171,6 +174,7 @@
             .replaceAll("'","&#039;");
     }
 
+    // Ergebnis rendern (unterstützt auch Bild-Spalte "bild")
     function renderResultsInto(containerId, results, extraInfoHtml='') {
         const out = document.getElementById(containerId);
         out.innerHTML = '';
@@ -202,12 +206,11 @@
 
             const thead = document.createElement('thead');
             const trh = document.createElement('tr');
-           columns.forEach(c => {
-  const th = document.createElement('th');
-  th.textContent = c;
-  trh.appendChild(th);
-});
-
+            columns.forEach(c => {
+                const th = document.createElement('th');
+                th.textContent = c;
+                trh.appendChild(th);
+            });
             thead.appendChild(trh);
             table.appendChild(thead);
 
@@ -264,6 +267,7 @@
     }
 
     function randomGeschlecht(){
+        // PokeAPI liefert Geschlecht nicht direkt im pokemon endpoint -> für Training reicht random
         const r = Math.random();
         if (r < 0.45) return 'm';
         if (r < 0.90) return 'w';
@@ -295,18 +299,18 @@
                     const species = await fetchJson(detail.species.url);
                     const de = species.names.find(n => n.language.name === 'de');
                     if (de && de.name) {
-                        name = de.name.toLowerCase();
+                        name = de.name.toLowerCase(); // optional lower-case
                     }
                 } catch (e) {
-                  
+                    // falls species-call fehlschlägt → englischer Name bleibt
                 }
                 const level = randInt(5, 45);
-                const gewicht = detail.weight != null ? (detail.weight / 10) : null; 
+                const gewicht = detail.weight != null ? (detail.weight / 10) : null; // kg (PokeAPI weight = hectograms)
                 const geschlecht = randomGeschlecht();
 
                 insPokemon.run([id, bild, name, level, gewicht, geschlecht]);
 
-               
+                // Typen als eigene Zeilen (einfach abfragbar)
                 for (const t of detail.types) {
                     insPokemonTyp.run([t.type.name, id]);
                 }
@@ -324,7 +328,7 @@
         insPokemon.free();
         insPokemonTyp.free();
 
-       
+        // Trainer & Pokebälle als Trainingsdaten erzeugen (einfach)
         seedTrainerAndBalls(loadedIds);
 
         setLeftStatus(`Fertig: ${limit} Pokémon geladen. ✅`, 'ok');
@@ -332,7 +336,7 @@
     }
 
     function seedTrainerAndBalls(pokemonIds) {
-    
+        // 5 Trainer, jeweils 1 Pokémon (so wie deine FK-Struktur es vorgibt)
         const trainerNames = [
             { id: 1, name: 'Ash', alter: 14 },
             { id: 2, name: 'Misty', alter: 15 },
@@ -341,7 +345,7 @@
             { id: 5, name: 'Jessie', alter: 20 },
         ];
 
-       
+        // alte Trainer + Pokebälle löschen (damit Reset/Reload sauber ist)
         db.run(`DELETE FROM trainer;`);
         db.run(`DELETE FROM pokeball;`);
 
@@ -352,20 +356,20 @@
         const ballTypes = ['pokeball', 'superball', 'hyperball', 'meisterball'];
 
         for (const tr of trainerNames) {
-          
+            // random Pokémon wählen (ohne Doppelung)
             let pid = null;
             for (let tries = 0; tries < 50; tries++) {
                 const candidate = pokemonIds[randInt(0, pokemonIds.length - 1)];
                 if (!used.has(candidate)) { pid = candidate; used.add(candidate); break; }
             }
-          
+            // falls doch keins gefunden (sehr unwahrscheinlich)
             if (pid == null) pid = pokemonIds[0];
 
             const anzahl = randInt(1, 30);
 
             insTrainer.run([tr.id, pid, anzahl, tr.name, tr.alter]);
 
-           
+            // pro Trainer ein paar Pokebälle (random)
             const howMany = randInt(1, 6);
             for (let i = 0; i < howMany; i++) {
                 const typ = ballTypes[randInt(0, ballTypes.length - 1)];
@@ -418,7 +422,7 @@
         renderResultsInto('tableOut', res, `<div><b>Schema:</b> <code>${escapeHtml(q)}</code></div>`);
     }
 
-  
+    // --- Run any SQL (DDL/DML/SELECT) ---
     function runUserSql() {
         const sql = document.getElementById('sqlEditor').value.trim();
         if (!sql) {
@@ -440,7 +444,7 @@
 
             renderResultsInto('resultOut', results, info);
 
-    
+            // falls Tabellen verändert wurden (CREATE/DROP), Liste aktualisieren
             refreshTableList();
         } catch (e) {
             renderResultsInto('resultOut', [], `<div style="color:#b00020;white-space:pre-wrap;"><b>SQL Fehler:</b>\n${escapeHtml(e.message || String(e))}</div>`);
@@ -512,7 +516,7 @@
         document.getElementById('btnRun').disabled = false;
         document.getElementById('btnReset').disabled = false;
 
-     
+        // Start: zeig direkt pokemon an
         viewTable('pokemon', 25);
 
         setLeftStatus('Bereit. ✅', 'ok');
@@ -523,6 +527,3 @@
 </script>
 </body>
 </html>
-
-
-
