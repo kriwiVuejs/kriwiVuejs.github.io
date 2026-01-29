@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="de">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Pokémon SQL Playground</title>
+
+    <!-- SQL Engine im Browser (SQLite via WebAssembly) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+    <link rel="stylesheet" href="style.css">
+
+
+
+
+    <style>
+        :root{ --b:#e5e7eb; --bg:#fff; --muted:#6b7280; --err:#b00020; --ok:#065f46; --card:#f9fafb; }
+        body{font-family:system-ui;margin:24px;max-width:1200px;background:var(--bg);color:#111827}
+        h1{margin:0 0 8px}
+        p{margin:8px 0;color:var(--muted)}
+        .grid{display:grid;gap:16px}
+        @media (min-width: 980px){ .grid{grid-template-columns: 1.2fr 1.8fr} }
+
+        .card{border:1px solid var(--b);border-radius:12px;padding:14px;background:var(--card)}
+        .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+        .row > * {flex:0 0 auto}
+        select, input, button{font:inherit}
+        select, input{padding:8px 10px;border:1px solid var(--b);border-radius:10px;background:#fff}
+        button{padding:9px 14px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;cursor:pointer}
+        button:hover{background:#f3f4f6}
+        button.primary{background:#111827;color:#fff;border-color:#111827}
+        button.primary:hover{background:#0b1220}
+        button.danger{border-color:#fecaca;background:#fff5f5}
+        button.danger:hover{background:#ffecec}
+        button:disabled{opacity:.6;cursor:not-allowed}
+
+        textarea{
+            width:100%;min-height:160px;
+            font-family:ui-monospace,Consolas,monospace;
+            border:1px solid var(--b);border-radius:12px;padding:10px;background:#fff;
+            resize:vertical
+        }
+
+        .status{margin-top:10px;font-size:13px}
+        .status .loading{color:#1d4ed8}
+        .status .ok{color:var(--ok)}
+        .status .error{color:var(--err);white-space:pre-wrap}
+        .small{font-size:12px;color:var(--muted)}
+
+        table{border-collapse:collapse;width:100%;margin-top:12px;background:#fff;border-radius:12px;overflow:hidden}
+        th,td{border:1px solid var(--b);padding:6px 8px;text-align:left;vertical-align:top}
+        th{background:#f3f4f6;position:sticky;top:0;z-index:1}
+        .scroll{max-height:420px;overflow:auto;border-radius:12px;border:1px solid var(--b);background:#fff}
+        .imgcell img{width:44px;height:44px;image-rendering:pixelated}
+        code{background:#f3f4f6;padding:2px 6px;border-radius:8px}
+    </style>
+</head>
+
+<body>
+<h1>Pokémon SQL Playground</h1>
+<p>
+    Links: Tabellen ansehen. Unten: SQL schreiben und ausführen. Unter dem Editor erscheint das Resultat.
+    <br><span class="small">Hinweis: Hier sind <b>alle SQL-Statements</b> erlaubt (CREATE/ALTER/INSERT/UPDATE/DELETE/SELECT …). Falls du dir die DB „zerschießt“: <b>Reset</b>.</span>
+</p>
+
+<div class="grid">
+    <!-- LEFT: Table browser -->
+    <section class="card">
+        <h2 style="margin:0 0 10px;">Tabellen ansehen</h2>
+
+        <div class="row">
+            <label class="small" for="tableSelect">Tabelle</label>
+            <select id="tableSelect"></select>
+
+            <label class="small" for="limitInput">Limit</label>
+            <input id="limitInput" type="number" value="50" min="1" max="500" style="width:90px" />
+
+            <button id="btnViewTable">Anzeigen</button>
+            <button id="btnDescribe">Schema</button>
+        </div>
+
+        <div class="status" style="margin-top:10px;">
+            <div id="leftStatus" class="loading">Initialisiere…</div>
+        </div>
+
+        <div class="scroll" style="margin-top:12px;">
+            <div id="tableOut" style="padding:10px;">
+                <p class="small">Noch keine Anzeige. Wähle eine Tabelle und klicke „Anzeigen“.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- RIGHT: SQL editor + results -->
+    <section class="card">
+        <h2 style="margin:0 0 10px;">SQL ausführen</h2>
+
+        <div class="row">
+            <button class="primary" id="btnRun" disabled>Ausführen</button>
+            <button id="btnClear">Editor leeren</button>
+            <button class="danger" id="btnReset" disabled>Reset DB</button>
+        </div>
+
+        <textarea id="sqlEditor"></textarea>
+
+        <div class="status">
+            <div id="rightStatus" class="loading">DB wird geladen…</div>
+        </div>
+
+        <div class="scroll" style="margin-top:12px;">
+            <div id="resultOut" style="padding:10px;">
+                <p class="small">Ergebnis erscheint hier nach dem Ausführen.</p>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+    let SQL = null;
+    let db = null;
+
+
+    // ✅ Deine Tabellen – so wie du sie willst (einfach, klare Spaltennamen)
+    const schemaSql = `
+        CREATE TABLE pokemon (
+                                 id INTEGER PRIMARY KEY,
+                                 bild TEXT,
+                                 name TEXT,
+                                 level INTEGER,
+                                 gewicht REAL,
+                                 geschlecht TEXT
+        );
+
+        CREATE TABLE trainer (
+                                 id INTEGER PRIMARY KEY,
+                                 pokemon_id INTEGER,
+                                 anzahl_pokebaelle INTEGER,
+                                 name TEXT,
+                                 alter_jahre INTEGER,
+                                 FOREIGN KEY (pokemon_id) REFERENCES pokemon(id)
+        );
+
+
+        CREATE TABLE pokeball (
+                                  id INTEGER PRIMARY KEY,
+                                  pokemon_id INTEGER,
+                                  typ TEXT,
+                                  FOREIGN KEY (pokemon_id) REFERENCES pokemon(id)
+        );
+
+        CREATE TABLE pokemon_typ (
+                                     id INTEGER PRIMARY KEY,
+                                     typ TEXT,
+                                     pokemon_id INTEGER,
+                                     FOREIGN KEY (pokemon_id) REFERENCES pokemon(id)
+        );
+    `;
+
+    // --- UI helpers ---
+    function setLeftStatus(text, cls='loading') {
+        const el = document.getElementById('leftStatus');
+        el.className = cls;
+        el.textContent = text;
+    }
+    function setRightStatus(text, cls='loading') {
+        const el = document.getElementById('rightStatus');
+        el.className = cls;
+        el.textContent = text;
+    }
+    function escapeHtml(str){
+        return String(str)
+            .replaceAll("&","&amp;")
+            .replaceAll("<","&lt;")
+            .replaceAll(">","&gt;")
+            .replaceAll('"',"&quot;")
+            .replaceAll("'","&#039;");
+    }
+
+    // Ergebnis rendern (unterstützt auch Bild-Spalte "bild")
+    function renderResultsInto(containerId, results, extraInfoHtml='') {
+        const out = document.getElementById(containerId);
+        out.innerHTML = '';
+
+        if (extraInfoHtml) {
+            const info = document.createElement('div');
+            info.className = 'small';
+            info.innerHTML = extraInfoHtml;
+            out.appendChild(info);
+        }
+
+        if (!results || results.length === 0) {
+            out.insertAdjacentHTML('beforeend', `<p class="small">Kein Result-Set (z. B. DDL/DML ohne SELECT). Tipp: <code>SELECT changes();</code> oder eine Tabelle ansehen.</p>`);
+            return;
+        }
+
+        results.forEach((res, idx) => {
+            const { columns, values } = res;
+
+            if (results.length > 1) {
+                const title = document.createElement('div');
+                title.className = 'small';
+                title.style.marginTop = '10px';
+                title.textContent = `Result-Set ${idx+1}`;
+                out.appendChild(title);
+            }
+
+            const table = document.createElement('table');
+
+            const thead = document.createElement('thead');
+            const trh = document.createElement('tr');
+            columns.forEach(c => {
+                const th = document.createElement('th');
+                th.textContent = c;
+                trh.appendChild(th);
+            });
+            thead.appendChild(trh);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            values.forEach(row => {
+                const tr = document.createElement('tr');
+                row.forEach((cell, cidx) => {
+                    const td = document.createElement('td');
+                    const colName = String(columns[cidx]).toLowerCase();
+                    const val = cell ?? '';
+
+                    if (colName === 'bild' && typeof val === 'string' && val.startsWith('http')) {
+                        td.className = 'imgcell';
+                        td.innerHTML = `<img src="${escapeHtml(val)}" alt="sprite">`;
+                    } else {
+                        td.textContent = val;
+                    }
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            out.appendChild(table);
+        });
+    }
+
+    // --- PokeAPI Loader (füllt pokemon + pokemon_typ) ---
+    async function fetchJson(url){
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status} bei ${url}`);
+        return res.json();
+    }
+
+    function randInt(min, max){
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    async function mapWithConcurrency(items, limit, mapper, onProgress){
+        let i = 0, done = 0;
+        const results = new Array(items.length);
+
+        const workers = Array.from({ length: limit }, async () => {
+            while (i < items.length){
+                const idx = i++;
+                results[idx] = await mapper(items[idx], idx);
+                done++;
+                onProgress?.(done, items.length);
+            }
+        });
+
+        await Promise.all(workers);
+        return results;
+    }
+
+    function randomGeschlecht(){
+        // PokeAPI liefert Geschlecht nicht direkt im pokemon endpoint -> für Training reicht random
+        const r = Math.random();
+        if (r < 0.45) return 'm';
+        if (r < 0.90) return 'w';
+        return 'unbekannt';
+    }
+
+    async function loadFromPokeApi({limit = 80, concurrency = 8} = {}) {
+        setLeftStatus('Lade Pokémon-Liste…', 'loading');
+        setRightStatus('Lade Pokémon-Daten aus PokeAPI…', 'loading');
+
+        const list = await fetchJson(`https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=0`);
+        const entries = list.results;
+
+        const insPokemon = db.prepare(`INSERT OR REPLACE INTO pokemon (id, bild, name, level, gewicht, geschlecht) VALUES (?, ?, ?, ?, ?, ?)`);
+        const insPokemonTyp = db.prepare(`INSERT INTO pokemon_typ (typ, pokemon_id) VALUES (?, ?)`);
+
+        const loadedIds = [];
+
+        await mapWithConcurrency(
+            entries,
+            concurrency,
+            async (entry) => {
+                const detail = await fetchJson(entry.url);
+
+                const id = detail.id;
+                const bild = detail.sprites?.front_default || null;
+                let name = detail.name;
+                try {
+                    const species = await fetchJson(detail.species.url);
+                    const de = species.names.find(n => n.language.name === 'de');
+                    if (de && de.name) {
+                        name = de.name.toLowerCase(); // optional lower-case
+                    }
+                } catch (e) {
+                    // falls species-call fehlschlägt → englischer Name bleibt
+                }
+                const level = randInt(5, 45);
+                const gewicht = detail.weight != null ? (detail.weight / 10) : null; // kg (PokeAPI weight = hectograms)
+                const geschlecht = randomGeschlecht();
+
+                insPokemon.run([id, bild, name, level, gewicht, geschlecht]);
+
+                // Typen als eigene Zeilen (einfach abfragbar)
+                for (const t of detail.types) {
+                    insPokemonTyp.run([t.type.name, id]);
+                }
+
+                loadedIds.push(id);
+                return true;
+            },
+            (done, total) => {
+                const msg = `Lade Pokémon… ${done}/${total}`;
+                setLeftStatus(msg, 'loading');
+                setRightStatus(msg, 'loading');
+            }
+        );
+
+        insPokemon.free();
+        insPokemonTyp.free();
+
+        // Trainer & Pokebälle als Trainingsdaten erzeugen (einfach)
+        seedTrainerAndBalls(loadedIds);
+
+        setLeftStatus(`Fertig: ${limit} Pokémon geladen. ✅`, 'ok');
+        setRightStatus(`Bereit. ✅`, 'ok');
+    }
+
+    function seedTrainerAndBalls(pokemonIds) {
+        // 5 Trainer, jeweils 1 Pokémon (so wie deine FK-Struktur es vorgibt)
+        const trainerNames = [
+            { id: 1, name: 'Ash', alter: 14 },
+            { id: 2, name: 'Misty', alter: 15 },
+            { id: 3, name: 'Brock', alter: 16 },
+            { id: 4, name: 'Gary', alter: 14 },
+            { id: 5, name: 'Jessie', alter: 20 },
+        ];
+
+        // alte Trainer + Pokebälle löschen (damit Reset/Reload sauber ist)
+        db.run(`DELETE FROM trainer;`);
+        db.run(`DELETE FROM pokeball;`);
+
+        const used = new Set();
+        const insTrainer = db.prepare(`INSERT OR REPLACE INTO trainer (id, pokemon_id, anzahl_pokebaelle, name, alter_jahre) VALUES (?, ?, ?, ?, ?)`)
+        const insBall = db.prepare(`INSERT INTO pokeball (pokemon_id, typ) VALUES (?, ?)`);
+
+        const ballTypes = ['pokeball', 'superball', 'hyperball', 'meisterball'];
+
+        for (const tr of trainerNames) {
+            // random Pokémon wählen (ohne Doppelung)
+            let pid = null;
+            for (let tries = 0; tries < 50; tries++) {
+                const candidate = pokemonIds[randInt(0, pokemonIds.length - 1)];
+                if (!used.has(candidate)) { pid = candidate; used.add(candidate); break; }
+            }
+            // falls doch keins gefunden (sehr unwahrscheinlich)
+            if (pid == null) pid = pokemonIds[0];
+
+            const anzahl = randInt(1, 30);
+
+            insTrainer.run([tr.id, pid, anzahl, tr.name, tr.alter]);
+
+            // pro Trainer ein paar Pokebälle (random)
+            const howMany = randInt(1, 6);
+            for (let i = 0; i < howMany; i++) {
+                const typ = ballTypes[randInt(0, ballTypes.length - 1)];
+                insBall.run([pid, typ]);
+            }
+        }
+
+        insTrainer.free();
+        insBall.free();
+    }
+
+    // --- Table browser helpers ---
+    function refreshTableList() {
+        const select = document.getElementById('tableSelect');
+        select.innerHTML = '';
+
+        const res = db.exec(`
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table' AND name NOT LIKE 'sqlite_%'
+            ORDER BY name;
+        `);
+
+        const names = (res[0]?.values || []).map(r => r[0]);
+        if (names.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = '(keine Tabellen)';
+            select.appendChild(opt);
+            return;
+        }
+
+        names.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+    }
+
+    function viewTable(name, limit) {
+        const q = `SELECT * FROM ${name} LIMIT ${Number(limit) || 50};`;
+        const res = db.exec(q);
+        renderResultsInto('tableOut', res, `<div><b>Query:</b> <code>${escapeHtml(q)}</code></div>`);
+    }
+
+    function describeTable(name) {
+        const q = `PRAGMA table_info(${name});`;
+        const res = db.exec(q);
+        renderResultsInto('tableOut', res, `<div><b>Schema:</b> <code>${escapeHtml(q)}</code></div>`);
+    }
+
+    // --- Run any SQL (DDL/DML/SELECT) ---
+    function runUserSql() {
+        const sql = document.getElementById('sqlEditor').value.trim();
+        if (!sql) {
+            renderResultsInto('resultOut', [], `<div class="small">Bitte SQL eingeben.</div>`);
+            return;
+        }
+
+        try {
+            const results = db.exec(sql);
+
+            let info = '';
+            try {
+                const ch = db.exec(`SELECT changes() AS changes, last_insert_rowid() AS last_insert_rowid;`);
+                const row = ch?.[0]?.values?.[0];
+                if (row) {
+                    info = `<div><b>Info:</b> changes=${escapeHtml(row[0])}, last_insert_rowid=${escapeHtml(row[1])}</div>`;
+                }
+            } catch (_) {}
+
+            renderResultsInto('resultOut', results, info);
+
+            // falls Tabellen verändert wurden (CREATE/DROP), Liste aktualisieren
+            refreshTableList();
+        } catch (e) {
+            renderResultsInto('resultOut', [], `<div style="color:#b00020;white-space:pre-wrap;"><b>SQL Fehler:</b>\n${escapeHtml(e.message || String(e))}</div>`);
+        }
+    }
+
+    // --- Reset DB ---
+    let currentLoadLimit = 80;
+
+    async function resetDb() {
+        try {
+            setLeftStatus('Reset läuft…', 'loading');
+            setRightStatus('Reset läuft…', 'loading');
+
+            db.close();
+            db = new SQL.Database();
+
+            db.run(schemaSql);
+            await loadFromPokeApi({ limit: currentLoadLimit, concurrency: 8 });
+
+            refreshTableList();
+            renderResultsInto('tableOut', [], `<div class="small">Reset fertig. Wähle eine Tabelle.</div>`);
+            renderResultsInto('resultOut', [], `<div class="small">Reset fertig. Du kannst wieder SQL ausführen.</div>`);
+
+            setLeftStatus('Bereit. ✅', 'ok');
+            setRightStatus('Bereit. ✅', 'ok');
+        } catch (e) {
+            setLeftStatus('Reset fehlgeschlagen.', 'error');
+            setRightStatus('Reset fehlgeschlagen.', 'error');
+            renderResultsInto('resultOut', [], `<div style="color:#b00020;white-space:pre-wrap;"><b>Reset Fehler:</b>\n${escapeHtml(e.message || String(e))}</div>`);
+        }
+    }
+
+    // --- Init ---
+    async function init() {
+        setLeftStatus('SQL Engine wird geladen…', 'loading');
+        setRightStatus('SQL Engine wird geladen…', 'loading');
+
+        SQL = await initSqlJs({
+            locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${f}`
+        });
+
+        db = new SQL.Database();
+        db.run(schemaSql);
+
+        await loadFromPokeApi({ limit: currentLoadLimit, concurrency: 8 });
+
+        refreshTableList();
+
+        document.getElementById('btnViewTable').addEventListener('click', () => {
+            const name = document.getElementById('tableSelect').value;
+            const limit = document.getElementById('limitInput').value;
+            if (!name) return;
+            viewTable(name, limit);
+        });
+
+        document.getElementById('btnDescribe').addEventListener('click', () => {
+            const name = document.getElementById('tableSelect').value;
+            if (!name) return;
+            describeTable(name);
+        });
+
+        document.getElementById('btnRun').addEventListener('click', runUserSql);
+        document.getElementById('btnClear').addEventListener('click', () => {
+            document.getElementById('sqlEditor').value = '';
+        });
+        document.getElementById('btnReset').addEventListener('click', () => resetDb());
+
+        document.getElementById('btnRun').disabled = false;
+        document.getElementById('btnReset').disabled = false;
+
+        // Start: zeig direkt pokemon an
+        viewTable('pokemon', 25);
+
+        setLeftStatus('Bereit. ✅', 'ok');
+        setRightStatus('Bereit. ✅', 'ok');
+    }
+
+    init();
+</script>
+</body>
+</html>
